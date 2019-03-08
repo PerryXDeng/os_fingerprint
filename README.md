@@ -1,4 +1,3 @@
-"""
 FILENAME: concurrent_icmp_fingerprinting.py
 AUTHOR: Perry Deng pxdeng@pm.me
 DATE: 03.05.2019
@@ -12,12 +11,18 @@ to receive all the responses
 requires only Python Standard Library
 requires root/administrative privilege due to packet engineering
 
-Usage: python3 concurrent_icmp_fingerprinting.py <inputfile> <response timeout in seconds> <ip version: 4/6>
-where input is ascii file containing rows of ipv4/ipv6 addresses
+Usage: python3 concurrent_icmp_fingerprinting.py <inputfile>
+  <response timeout in seconds>
+  <ping interval in milliseconds> <ip version: 4/6>
+where input file is an ascii file containing the ip addresses,
+response timeout is a natural number for the maximum time to wait for response,
+ping interval is a natural number to reduce the frequency of pinging (0 for most frequent),
+and ip version should be 4 or 6
 
 does not work against IPv6 hosts autoconfigured by network routers to have the
 same hop limits
 
+ttl fingerprinting over internet is a feature in development
+
 for more information, reference:
 https://www.sans.org/reading-room/whitepapers/testing/paper/33794
-"""

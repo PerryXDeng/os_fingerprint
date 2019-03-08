@@ -3,12 +3,9 @@ FILENAME: sequential.py
 AUTHOR: Perry Deng pxdeng@pm.me
 DATE: 03.05.2019
 
-Usage: python3 sequential.py <input>
-where input is ascii file containing rows of ipv4 addresses
-
 runs in python3
 requires only the standard library
-
+CSEC465 Lab 03 Task 4
 sequentially pings hosts from an input file and classify host OS based on response ttl
 only works within an IPv4 Network
 """
