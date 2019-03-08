@@ -13,11 +13,9 @@ requires only Python Standard Library
 
 may require root/administrative privilege due to packet engineering and usage of raw sockets
 
-Usage: python3 concurrent_icmp_fingerprinting.py 
-<inputfile>
-<response timeout in seconds>
-<ping interval in milliseconds> 
-<ip version: 4/6>
+Usage: python3 concurrent_icmp_fingerprinting.py inputfile response_timeout_in_seconds 
+ping_interval_in_milliseconds
+ip_version:_4/6
 
 where input file is an ascii file containing the ip addresses,
 response timeout is a natural number for the maximum time to wait for response,
