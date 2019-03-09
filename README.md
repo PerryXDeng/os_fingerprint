@@ -4,10 +4,14 @@ DATE: 03.05.2019
 
 This is a concurrent tool written in python 3.6 for fingerprinting operating systems of
 remote hosts based on TTLs(IPv4) or HL(IPv6), an I/O bound task ripe for single
-core concurrency
+core concurrency.
 
 This implementation uses one thread to send all the requests and another thread
-to receive all the responses, and then disects the packets for ttl configuration
+to receive all the responses, and then disects the packets for ttl configuration. Since it is done concurrently, it is 
+much faster than similar techniques done sequentially, because it does not have to wait for response from one host to
+start pinging the next. The memory usage of the concurrent implementation scales linearly as it needs to keep track of
+all the "traceroute" responders for a particular IP address, which is acceptable given that the sequential version takes
+hours if not days to run for large number of hosts.
 
 If the target host is outside the network, the program will run a DIY traceroute implmentation which will take more time
 than LAN targets.
