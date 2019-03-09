@@ -134,15 +134,17 @@ def _send_pings_left(sock, targets, left, ipv6=False, sleep=0):
       time.sleep(sleep/1000)
 
 
-def _receive_pings(sock, targets, reached, results, anticipated, payload_size,
+def _receive_pings(sock, targets, contacted, reached, hops, anticipated, payload_size,
                    timeout, holder, ipv6=False):
   """
   the function that keeps receiving and parsing icmp responses until timeout
   or receiving from the anticipated amount of responders
   :param sock: socket
   :param targets: target hosts
+  :param contacted: array of sets for dropping packets from responders that have
+    already responded to a particular icmp request
   :param reached: for keeping records of whether a target host has responded
-  :param results: for keeping records of the number of hops it takes to get to
+  :param hops: for keeping records of the number of hops it takes to get to
     the targets, or the calculated ttl configuration if target reached
   :param anticipated: anticipated amount of responders
   :param payload_size: size of the icmp packet, used for buffering
@@ -151,8 +153,6 @@ def _receive_pings(sock, targets, reached, results, anticipated, payload_size,
     addresses that are reachable but have not been reached
   :param ipv6: whether ipv6 is enabled
   """
-  # used for dropping packets from responders that have already responded
-  contacted = [False] * len(targets)
   # following variables are for buffering and dissecting the packets
   ipheader_size = 20
   icmpheader_size = 8
@@ -185,31 +185,31 @@ def _receive_pings(sock, targets, reached, results, anticipated, payload_size,
     except Exception as e:
       print(str(e))
       return
+    src_ip = struct.unpack('B' * src_len, reply[src_offset:src_offset + src_len])
     icmp_packet = struct.unpack('BBHHH', reply[ipheader_size:ipheader_size + icmpheader_size])
-    if icmp_packet[0] == icmp_type_reply or icmp_packet[0] == icmp_type_ttl_exceeded:
-      src = struct.unpack('B'*src_len, reply[src_offset:src_offset + src_len])
-      icmp_id = icmp_packet[3]
-      matching_IP = True
-      temp = targets[icmp_id].split('.')
-      for i in range(len(src)):
-        if not src[i] == int(temp[i]):
-          matching_IP = False
-      if matching_IP:
-        # RESPONSE FROM HOST
-        if not contacted[icmp_id]:
-          contacted[icmp_id] = True
-          total += 1
+    icmp_type = icmp_packet[0]
+    icmp_id = icmp_packet[3]
+    if not src_ip in contacted[icmp_id]:
+      contacted[icmp_id].add(src_ip)
+      total += 1
+      if icmp_type == icmp_type_reply:
+        target_ip = targets[icmp_id].split('.')
+        matching_IP = True
+        for i in range(len(src_ip)):
+          if not src_ip[i] == int(target_ip[i]):
+            matching_IP = False
+        if matching_IP:
+          # RESPONSE FROM HOST
           ttl = struct.unpack('B', reply[ttl_offset:ttl_offset + 1])[0]
           # host ttl = # of hops + response ttl
-          results[icmp_id] += ttl
+          hops[icmp_id] += ttl
           reached[icmp_id] = True
-      else:
-        # RESPONSE FROM HOPPED SERVERS
-        if not contacted[icmp_id]:
-          contacted[icmp_id] = True
-          results[icmp_id] += 1
-          # iterates through the same host next time with higher hop count
-          left.put(icmp_id)
+        else:
+          print("Error: inconsistent icmp identification, source IP address, and response type")
+      elif icmp_type == icmp_type_ttl_exceeded:
+        hops[icmp_id] += 1
+        # iterates through the same host next time with higher hop count
+        left.put(icmp_id)
   holder[0] = left
 
 
@@ -220,21 +220,19 @@ def _get_hop_limits(targets, timeout, ipv6=False, sleep=0):
   :param targets: strings of ip addresses
   :param timeout: how long it takes for a response to timeout
   :param ipv6: whether ipv6 is enabled
-  :param sleep: how long to sleep for
-  :return: the number of hops it takes to ping them and whether they are
+  :param sleep: how long to sleep for in between requests
+  :return: the number of hops it takes to ping them and whether they are reached
   """
   n = len(targets) # n must be smaller than 2^16 to allow for concurrent pinging
-  results = [0] * n
-  indices = {}
+  hops = [0] * n
   # the queue for pushing icmp_ids of unreached, but reachable targets
   # hosts, which will be pinged the next iteration with higher hop counts
   # icmp_ids are the same as their index in the array of targets
   left = queue.Queue()
   reached = [False] * n
+  contacted = [set() for _ in range(n)]
   for i in range(n):
-    target = targets[i]
     left.put(i)
-    indices[target] = i
   total = 0
   max_hops = 64
   sock_af = socket.AF_INET
@@ -252,6 +250,9 @@ def _get_hop_limits(targets, timeout, ipv6=False, sleep=0):
     print('Fatal: General error in socket()', file=sys.stderr)
     exit(1)
   sock.settimeout(timeout)  # timeout set to 3 seconds
+  # increments the max hops for targets that are reachable but not yet reached
+  # to calculate the original host ttl configuration by adding the # of hops
+  # to the response ttl
   for i in range(max_hops):
     if ipv6:
       sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_UNICAST_HOPS, i + 1)
@@ -261,14 +262,14 @@ def _get_hop_limits(targets, timeout, ipv6=False, sleep=0):
     ip_payload_size = 32
     holder = [None]
     r = threading.Thread(target=_receive_pings,
-                         args=(sock, targets, reached, results, anticipated, ip_payload_size, timeout, holder, ipv6))
+                         args=(sock, targets, contacted, reached, hops, anticipated, ip_payload_size, timeout, holder, ipv6))
     s = threading.Thread(target=_send_pings_left, args=(sock, targets, left, ipv6, sleep))
     r.start()
     s.start()
     s.join()
     r.join()
     #_send_pings_left(sock, targets, left, ipv6)
-    #_receive_pings(sock, targets, reached, results, anticipated, ip_payload_size, timeout, holder, ipv6)
+    #_receive_pings(sock, targets, reached, hops, anticipated, ip_payload_size, timeout, holder, ipv6)
     left = holder[0]
     if left is not None:
       total += anticipated - left.qsize()
@@ -279,7 +280,7 @@ def _get_hop_limits(targets, timeout, ipv6=False, sleep=0):
     if total == n:
       break
   sock.close()
-  return results, reached
+  return hops, reached
 
 
 def get_hop_limits(targets, timeout=5, ipv6=False, sleep=0):
@@ -291,13 +292,15 @@ def get_hop_limits(targets, timeout=5, ipv6=False, sleep=0):
   :param timeout: how long it takes for a response to timeout
   :param ipv6: whether ipv6 is enabled
   :param sleep: how long to sleep for
-  :return: the number of hops it takes to ping them and whether they are
-    actually reachable
+  :return: hops/ttl configuration of target hosts and whether they are
+    actually reached. if they are not reached, the hops is not the configuration
+    but rather the number of hops the program has tried in order to reach the
+    host
   """
   batch_size = 2^16
   total = len(targets)
   batch_num = total // batch_size
-  results = []
+  hops = []
   reached = []
   for i in range(batch_num + 1):
     start = i * batch_size
@@ -305,9 +308,9 @@ def get_hop_limits(targets, timeout=5, ipv6=False, sleep=0):
     if finish > total:
       finish = total
     res, rea = _get_hop_limits(targets[start:finish], timeout, ipv6, sleep)
-    results += res
+    hops += res
     reached += rea
-  return results, reached
+  return hops, reached
 
 
 def main():
@@ -328,14 +331,14 @@ def main():
           '<response timeout in seconds> <ping interval in milliseconds> '
           '<ip version: 4/6>')
     return
-  results, reached = get_hop_limits(targets, timeout, ipv6, sleep)
+  hops, reached = get_hop_limits(targets, timeout, ipv6, sleep)
   for i in range(len(targets)):
     status = 'Unreachable'
     if reached[i]:
-      result = results[i]
-      if result == 128:
+      config = hops[i]
+      if config == 128:
         status = 'Windows'
-      elif result == 64:
+      elif config == 64:
         status = 'Linux/MacOS'
       else:
         status = 'Other'
